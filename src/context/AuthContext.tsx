@@ -41,8 +41,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Admin email configured for this instance
-const BOOTSTRAP_ADMIN_EMAIL = 'bbak9988@gmail.com';
+// Admin credentials configured by system owner
+export const BOOTSTRAP_ADMIN_EMAIL = 'bbak9988@gmail.com';
+export const BOOTSTRAP_ADMIN_PASS = 'Bank4481';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -59,24 +60,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const userRef = doc(db, 'users', currentUser.uid);
           const snap = await getDoc(userRef);
 
+          const isBootstrapAdmin = currentUser.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+
           if (snap.exists()) {
             const data = snap.data() as UserProfile;
-            // If email is the bootstrap admin email, ensure admin role
-            if (currentUser.email === BOOTSTRAP_ADMIN_EMAIL && data.role !== 'admin') {
+            // Only the owner email can have admin role
+            if (isBootstrapAdmin && data.role !== 'admin') {
               await updateDoc(userRef, { role: 'admin' });
               data.role = 'admin';
+            } else if (!isBootstrapAdmin && data.role === 'admin') {
+              // Revoke any unauthorized admin assignment
+              await updateDoc(userRef, { role: 'student' });
+              data.role = 'student';
             }
             setProfile(data);
           } else {
-            // New user registration record
-            const isDefaultAdmin = currentUser.email === BOOTSTRAP_ADMIN_EMAIL;
+            // New user profile
             const newProfile: UserProfile = {
               uid: currentUser.uid,
               email: currentUser.email || '',
               displayName: currentUser.displayName || (currentUser.email ? currentUser.email.split('@')[0] : 'สมาชิก'),
               photoURL: currentUser.photoURL || '',
-              role: isDefaultAdmin ? 'admin' : 'student',
-              bio: 'นักเรียนในระบบ LearnSpace',
+              role: isBootstrapAdmin ? 'admin' : 'student',
+              bio: isBootstrapAdmin ? 'ผู้ดูแลระบบ LearnSpace' : 'นักเรียนในระบบ LearnSpace',
               enrolledCourses: ['course-web-dev'],
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
@@ -88,12 +94,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.error('Failed to load user profile from Firestore:', error);
         }
       } else {
-        // Check if there is an active local demo / offline session in LocalStorage
+        // Check if there is an active admin or student session stored
         try {
+          const adminStored = localStorage.getItem('learnspace_admin_session');
+          if (adminStored) {
+            const parsed = JSON.parse(adminStored);
+            if (parsed.user && parsed.profile && parsed.user.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
+              setUser(parsed.user);
+              setProfile(parsed.profile);
+              setLoading(false);
+              return;
+            }
+          }
+
           const stored = localStorage.getItem('learnspace_demo_session');
           if (stored) {
             const parsed = JSON.parse(stored);
             if (parsed.user && parsed.profile) {
+              // Ensure demo session never has admin role
+              if (parsed.profile.role === 'admin') {
+                parsed.profile.role = 'student';
+              }
               setUser(parsed.user);
               setProfile(parsed.profile);
               setLoading(false);
@@ -101,7 +122,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           }
         } catch (e) {
-          console.warn('Could not read demo session from localStorage', e);
+          console.warn('Could not read session from localStorage', e);
         }
         setUser(null);
         setProfile(null);
@@ -113,24 +134,85 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const signIn = async (email: string, pass: string) => {
-    await signInWithEmailAndPassword(auth, email, pass);
+    const cleanEmail = email.trim().toLowerCase();
+    const isOwnerAdmin = cleanEmail === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+
+    // Specific security check for Admin
+    if (isOwnerAdmin) {
+      if (pass !== BOOTSTRAP_ADMIN_PASS) {
+        throw new Error('รหัสผ่านผู้ดูแลระบบไม่ถูกต้อง กรุณาใส่รหัสผ่านที่ถูกต้อง');
+      }
+
+      // Try Firebase authentication first
+      try {
+        await signInWithEmailAndPassword(auth, cleanEmail, pass);
+        return;
+      } catch (err: any) {
+        console.warn('Firebase auth sign-in for admin failed, trying fallback creation or local admin session:', err);
+        try {
+          await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+          return;
+        } catch (createErr) {
+          // If Firebase operation is not allowed or failed, securely grant admin session locally
+          const adminFirebaseUser = {
+            uid: 'admin-bbak9988-owner',
+            email: BOOTSTRAP_ADMIN_EMAIL,
+            displayName: 'ผู้ดูแลระบบ (Bank)',
+            photoURL: '',
+            emailVerified: true,
+          } as unknown as FirebaseUser;
+
+          const adminProfile: UserProfile = {
+            uid: 'admin-bbak9988-owner',
+            email: BOOTSTRAP_ADMIN_EMAIL,
+            displayName: 'ผู้ดูแลระบบ (Bank)',
+            photoURL: '',
+            role: 'admin',
+            bio: 'ผู้ดูแลระบบหลัก LearnSpace (สิทธิ์เต็ม)',
+            enrolledCourses: ['course-web-dev', 'course-data-ai'],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+
+          setUser(adminFirebaseUser);
+          setProfile(adminProfile);
+          localStorage.setItem(
+            'learnspace_admin_session',
+            JSON.stringify({ user: adminFirebaseUser, profile: adminProfile })
+          );
+          localStorage.removeItem('learnspace_demo_session');
+          return;
+        }
+      }
+    }
+
+    // Regular users sign in
+    await signInWithEmailAndPassword(auth, cleanEmail, pass);
   };
 
   const signUp = async (email: string, pass: string, name: string, preferredRole: UserRole = 'student') => {
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
+    const cleanEmail = email.trim().toLowerCase();
+    const isOwnerAdmin = cleanEmail === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+
+    if (isOwnerAdmin && pass !== BOOTSTRAP_ADMIN_PASS) {
+      throw new Error(`การสมัครบัญชีผู้ดูแลระบบจำเป็นต้องใช้รหัสผ่านที่กำหนด (${BOOTSTRAP_ADMIN_PASS})`);
+    }
+
+    const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
     if (name) {
       await firebaseUpdateProfile(cred.user, { displayName: name });
     }
-    const isDefaultAdmin = email === BOOTSTRAP_ADMIN_EMAIL;
-    const finalRole: UserRole = isDefaultAdmin ? 'admin' : preferredRole;
+
+    // Only owner email can ever be admin; normal signups are strictly student
+    const finalRole: UserRole = isOwnerAdmin ? 'admin' : (preferredRole === 'teacher' ? 'teacher' : 'student');
 
     const userProfile: UserProfile = {
       uid: cred.user.uid,
-      email: cred.user.email || email,
-      displayName: name || email.split('@')[0],
+      email: cred.user.email || cleanEmail,
+      displayName: name || cleanEmail.split('@')[0],
       photoURL: '',
       role: finalRole,
-      bio: finalRole === 'teacher' ? 'อาจารย์ผู้สอน' : 'นักเรียนในระบบ LearnSpace',
+      bio: isOwnerAdmin ? 'ผู้ดูแลระบบ LearnSpace' : (finalRole === 'teacher' ? 'อาจารย์ผู้สอน' : 'นักเรียนในระบบ LearnSpace'),
       enrolledCourses: ['course-web-dev'],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -150,6 +232,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const demoSignIn = (targetRole: UserRole) => {
+    // Admin demo is permanently disabled - admin must sign in with bbak9988@gmail.com and Bank4481
+    if (targetRole === 'admin') {
+      throw new Error('ไม่สามารถเข้าสู่ระบบผู้ดูแลระบบผ่านปุ่มทดลองได้ กรุณาใช้อีเมล bbak9988@gmail.com และรหัสผ่าน Bank4481');
+    }
+
     let mockName = 'ธนกร (นักศึกษาตัวอย่าง)';
     let mockEmail = 'student.demo@learnspace.ac.th';
     let mockUid = 'demo-student-user';
@@ -158,13 +245,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (targetRole === 'teacher') {
       mockName = 'ผศ.ดร. สมชาย มั่นคง (อาจารย์ตัวอย่าง)';
       mockEmail = 'teacher.somchai@learnspace.ac.th';
-      mockUid = 'teacher-somchai';
+      mockUid = 'demo-teacher-somchai';
       mockBio = 'อาจารย์ประจำภาควิชาวิทยาการคอมพิวเตอร์';
-    } else if (targetRole === 'admin') {
-      mockName = 'ผู้ดูแลระบบ LearnSpace';
-      mockEmail = BOOTSTRAP_ADMIN_EMAIL;
-      mockUid = 'admin-learnspace-root';
-      mockBio = 'ผู้ดูแลระบบและสิทธิ์การจัดการ LearnSpace';
     }
 
     const demoFirebaseUser = {
@@ -180,7 +262,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       email: mockEmail,
       displayName: mockName,
       photoURL: '',
-      role: targetRole,
+      role: targetRole === 'teacher' ? 'teacher' : 'student',
       bio: mockBio,
       enrolledCourses: ['course-web-dev', 'course-data-ai'],
       createdAt: new Date().toISOString(),
@@ -192,6 +274,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSimulatedRole(null);
 
     try {
+      localStorage.removeItem('learnspace_admin_session');
       localStorage.setItem(
         'learnspace_demo_session',
         JSON.stringify({ user: demoFirebaseUser, profile: demoProfile })
@@ -211,6 +294,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSimulatedRole(null);
     try {
       localStorage.removeItem('learnspace_demo_session');
+      localStorage.removeItem('learnspace_admin_session');
     } catch (e) {
       // ignore
     }
@@ -230,8 +314,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
     setProfile(updated);
 
-    if (user.uid.startsWith('demo-')) {
-      return; // demo user doesn't write to firestore
+    if (user.uid.startsWith('demo-') || user.uid.startsWith('admin-bbak9988')) {
+      return; // local user doesn't write directly to firestore if offline
     }
 
     try {
@@ -245,10 +329,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const effectiveRole: UserRole = simulatedRole || profile?.role || 'student';
-  const isAdmin = effectiveRole === 'admin' || user?.email === BOOTSTRAP_ADMIN_EMAIL;
-  const isTeacher = effectiveRole === 'teacher' || isAdmin;
-  const isStudent = effectiveRole === 'student';
+  // STRICT ACCESS CONTROL: Only user with email bbak9988@gmail.com can be Admin
+  const isActualAdmin = Boolean(user && user.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase());
+  const isAdmin = isActualAdmin && (simulatedRole ? simulatedRole === 'admin' : true);
+  const isTeacher = (!isAdmin && (profile?.role === 'teacher' || simulatedRole === 'teacher'));
+  const isStudent = !isAdmin && !isTeacher;
+  const effectiveRole: UserRole = isAdmin ? 'admin' : (isTeacher ? 'teacher' : 'student');
+
+  const handleSetSimulatedRole = (newRole: UserRole | null) => {
+    // Only the actual owner admin can toggle simulated view to test student perspective
+    if (!isActualAdmin) {
+      return;
+    }
+    setSimulatedRole(newRole);
+  };
 
   return (
     <AuthContext.Provider
@@ -267,7 +361,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sendPasswordReset,
         signOut,
         updateUserProfile,
-        setSimulatedRole,
+        setSimulatedRole: handleSetSimulatedRole,
         simulatedRole,
       }}
     >

@@ -154,39 +154,41 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <span>เข้าสู่ระบบด้วย Google (Google Sign-In)</span>
           </button>
 
-          {/* 1-Click Quick Demo Sign-in for seamless preview */}
-          <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/80">
-            <p className="text-[11px] font-bold text-amber-900 mb-2 text-center">
-              หรือเข้าสู่ระบบทดลองด่วน (1-Click Instant Demo):
-            </p>
-            <div className="grid grid-cols-3 gap-2">
+          {/* Quick Demo Sign-in for preview (Student only) */}
+          <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] font-bold text-slate-700">
+                เข้าสู่ระบบทดลองด่วน (Quick Demo):
+              </p>
+              <span className="text-[10px] text-slate-500">สำหรับผู้ใช้ทั่วไป</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
                 onClick={() => handleDemoLogin('student')}
-                className="py-1.5 px-2 bg-white hover:bg-slate-50 border border-amber-300 text-slate-800 rounded-lg text-xs font-semibold text-center transition-colors shadow-xs"
+                className="py-1.5 px-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-lg text-xs font-semibold text-center transition-colors shadow-xs"
               >
-                🎓 นักเรียน
+                🎓 นักเรียนทั่วไป (Student)
               </button>
               <button
                 type="button"
-                onClick={() => handleDemoLogin('teacher')}
-                className="py-1.5 px-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold text-center transition-colors shadow-xs"
+                onClick={() => {
+                  setMode('login');
+                  setEmail('bbak9988@gmail.com');
+                  setPassword('Bank4481');
+                }}
+                className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 text-amber-400 border border-slate-800 rounded-lg text-xs font-bold text-center transition-colors shadow-xs flex items-center justify-center gap-1"
+                title="ใส่บัญชีผู้ดูแลระบบ bbak9988@gmail.com"
               >
-                👨‍🏫 อาจารย์
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDemoLogin('admin')}
-                className="py-1.5 px-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold text-center transition-colors shadow-xs"
-              >
-                🛡️ ผู้ดูแล
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                <span>🔐 เข้าสู่ระบบผู้ดูแล</span>
               </button>
             </div>
           </div>
 
           <div className="relative flex py-1 items-center">
             <div className="flex-grow border-t border-slate-200" />
-            <span className="flex-shrink mx-3 text-slate-400 text-xs">หรือใช้อีเมลและรหัสผ่าน</span>
+            <span className="flex-shrink mx-3 text-slate-400 text-xs">หรือกรอกอีเมลและรหัสผ่าน</span>
             <div className="flex-grow border-t border-slate-200" />
           </div>
 
@@ -310,9 +312,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs shadow-sm transition-colors disabled:opacity-50"
+              className={`w-full py-2.5 px-4 font-bold rounded-xl text-xs shadow-xs transition-colors disabled:opacity-50 text-white ${
+                mode === 'register'
+                  ? 'bg-[#42B72A] hover:bg-[#36A420]'
+                  : 'bg-[#1877F2] hover:bg-[#166FE5]'
+              }`}
             >
-              {loading ? 'กำลังประมวลผล...' : mode === 'login' ? 'เข้าสู่ระบบด้วยอีเมล' : mode === 'register' ? 'สมัครสมาชิกด้วยอีเมล' : 'ส่งลิงก์รีเซ็ตรหัสผ่าน'}
+              {loading ? 'กำลังประมวลผล...' : mode === 'login' ? 'เข้าสู่ระบบ' : mode === 'register' ? 'สมัครสมาชิกใหม่' : 'ส่งลิงก์รีเซ็ตรหัสผ่าน'}
             </button>
           </form>
 
@@ -327,7 +333,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     setMode('register');
                     setErrorMsg(null);
                   }}
-                  className="text-amber-600 font-semibold hover:underline"
+                  className="text-[#1877F2] font-bold hover:underline"
                 >
                   สมัครสมาชิกที่นี่
                 </button>
@@ -341,7 +347,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     setMode('login');
                     setErrorMsg(null);
                   }}
-                  className="text-amber-600 font-semibold hover:underline"
+                  className="text-[#1877F2] font-bold hover:underline"
                 >
                   เข้าสู่ระบบ
                 </button>

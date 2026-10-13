@@ -14,13 +14,16 @@ import {
   deleteDoc,
   getDocs,
 } from 'firebase/firestore';
-import { db, testConnection, handleFirestoreError, OperationType } from './lib/firebase';
+import { db, auth, testConnection, handleFirestoreError, OperationType } from './lib/firebase';
 import { seedInitialDatabaseIfEmpty } from './lib/seedData';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { Sidebar } from './components/layout/Sidebar';
+import { FacebookNavbar } from './components/facebook/FacebookNavbar';
+import { FacebookMessenger } from './components/facebook/FacebookMessenger';
+import { CreatePostModal } from './components/facebook/CreatePostModal';
 import { Footer } from './components/layout/Footer';
 import { AuthModal } from './components/auth/AuthModal';
 import { DashboardSkeleton } from './components/common/LoadingSkeleton';
+import { ShieldAlert, Lock } from 'lucide-react';
 
 // Views
 import { HomeView } from './views/HomeView';
@@ -55,6 +58,11 @@ function MainApp() {
   const [viewParams, setViewParams] = useState<any>({});
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
+
+  // Facebook UI States (Messenger dock & Create post modal)
+  const [messengerOpen, setMessengerOpen] = useState(false);
+  const [messengerContact, setMessengerContact] = useState<string | undefined>(undefined);
+  const [createPostModalOpen, setCreatePostModalOpen] = useState(false);
 
   // Firestore Data State
   const [courses, setCourses] = useState<Course[]>([]);
@@ -173,7 +181,14 @@ function MainApp() {
       return;
     }
 
-    if (user.uid.startsWith('demo-')) {
+    // Check if demo user, offline session, or no real Firebase Auth session yet
+    const isDemoOrOffline =
+      !auth.currentUser ||
+      user.uid.startsWith('demo-') ||
+      user.uid === 'teacher-somchai' ||
+      user.uid === 'admin-learnspace-root';
+
+    if (isDemoOrOffline) {
       // Demo session sample state
       setCompletedLessonIds(['lesson-web-1']);
       setSubmissions([
@@ -209,10 +224,15 @@ function MainApp() {
       return;
     }
 
+    if (!auth.currentUser) {
+      return;
+    }
+    const currentUid = auth.currentUser.uid;
+
     // 8. User Progress
     const progressQuery = query(
       collection(db, 'user_progress'),
-      where('userId', '==', user.uid)
+      where('userId', '==', currentUid)
     );
     const unsubProgress = onSnapshot(
       progressQuery,
@@ -230,7 +250,7 @@ function MainApp() {
     const submissionsQuery =
       isAdmin || isTeacher
         ? collection(db, 'submissions')
-        : query(collection(db, 'submissions'), where('studentId', '==', user.uid));
+        : query(collection(db, 'submissions'), where('studentId', '==', currentUid));
 
     const unsubSubmissions = onSnapshot(
       submissionsQuery,
@@ -244,7 +264,7 @@ function MainApp() {
     // 10. Quiz Attempts
     const attemptsQuery = query(
       collection(db, 'quiz_attempts'),
-      where('userId', '==', user.uid)
+      where('userId', '==', currentUid)
     );
     const unsubAttempts = onSnapshot(
       attemptsQuery,
@@ -260,7 +280,7 @@ function MainApp() {
       unsubSubmissions();
       unsubAttempts();
     };
-  }, [user, isAdmin, isTeacher]);
+  }, [user, profile, isAdmin, isTeacher]);
 
   const handleNavigate = (view: string, params: any = {}) => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -304,17 +324,19 @@ function MainApp() {
   const activeQuiz = quizzes.find((q) => q.id === viewParams.quizId) || quizzes[0];
 
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row bg-slate-50 text-slate-900 selection:bg-amber-500 selection:text-slate-950 font-['Prompt',sans-serif]">
+    <div className="min-h-screen flex flex-col bg-[#F0F2F5] text-slate-900 font-sans selection:bg-[#1877F2] selection:text-white">
       
-      {/* Sidebar Navigation (Desktop Left Sidebar & Mobile Bars) */}
-      <Sidebar
+      {/* Facebook Fixed Top Header */}
+      <FacebookNavbar
         currentView={currentView}
         onNavigate={handleNavigate}
         onOpenAuth={handleOpenAuth}
+        onToggleMessenger={() => setMessengerOpen(!messengerOpen)}
+        onOpenCreatePost={() => setCreatePostModalOpen(true)}
       />
 
-      {/* Main Content & Scrollable View Area */}
-      <div className="flex-1 flex flex-col min-h-screen pb-16 lg:pb-0 overflow-x-hidden">
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-h-[calc(100vh-3.5rem)] overflow-x-hidden">
         <main className="flex-1">
           {loadingData ? (
             <DashboardSkeleton />
@@ -324,8 +346,14 @@ function MainApp() {
               <HomeView
                 courses={courses}
                 settings={settings}
+                discussions={discussions}
+                replies={replies}
                 onNavigate={handleNavigate}
                 onOpenAuth={handleOpenAuth}
+                onOpenMessengerWithContact={(contact) => {
+                  setMessengerContact(contact);
+                  setMessengerOpen(true);
+                }}
               />
             )}
 
@@ -413,16 +441,46 @@ function MainApp() {
             )}
 
             {currentView === 'admin' && (
-              <AdminView
-                courses={courses}
-                lessons={lessons}
-                quizzes={quizzes}
-                assignments={assignments}
-                submissions={submissions}
-                settings={settings}
-                onNavigate={handleNavigate}
-                onRefreshData={handleRefreshData}
-              />
+              isAdmin ? (
+                <AdminView
+                  courses={courses}
+                  lessons={lessons}
+                  quizzes={quizzes}
+                  assignments={assignments}
+                  submissions={submissions}
+                  discussions={discussions}
+                  settings={settings}
+                  onNavigate={handleNavigate}
+                  onRefreshData={handleRefreshData}
+                />
+              ) : (
+                <div className="max-w-md mx-auto my-16 p-8 bg-white rounded-2xl border border-slate-200 shadow-xl text-center space-y-4">
+                  <div className="w-16 h-16 rounded-2xl bg-rose-50 text-rose-600 border border-rose-200 flex items-center justify-center mx-auto">
+                    <ShieldAlert className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">สงวนสิทธิ์เฉพาะผู้ดูแลระบบ</h2>
+                    <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                      ส่วนนี้เปิดให้เข้าถึงและจัดการเนื้อหาเฉพาะผู้ดูแลระบบหลัก (<span className="font-semibold text-slate-700">bbak9988@gmail.com</span>) เท่านั้น ผู้ใช้ทั่วไปไม่สามารถปรับเปลี่ยนเนื้อหาหรือหน้าตาของระบบได้
+                    </p>
+                  </div>
+                  <div className="pt-2 flex flex-col gap-2">
+                    <button
+                      onClick={() => handleOpenAuth('login')}
+                      className="w-full py-2.5 px-4 bg-[#1877F2] hover:bg-blue-600 text-white font-bold text-xs rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>เข้าสู่ระบบด้วยบัญชีผู้ดูแล (bbak9988@gmail.com)</span>
+                    </button>
+                    <button
+                      onClick={() => handleNavigate('home')}
+                      className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-colors"
+                    >
+                      กลับสู่หน้าหลัก
+                    </button>
+                  </div>
+                </div>
+              )
             )}
           </>
         )}
@@ -431,6 +489,21 @@ function MainApp() {
         {/* Footer */}
         <Footer onNavigate={handleNavigate} />
       </div>
+
+      {/* Facebook Messenger Floating Dock (Bottom Right) */}
+      <FacebookMessenger
+        isOpen={messengerOpen}
+        onClose={() => setMessengerOpen(false)}
+        activeContactName={messengerContact}
+        onOpenAuth={() => handleOpenAuth('login')}
+      />
+
+      {/* Facebook Create Post Dialog */}
+      <CreatePostModal
+        isOpen={createPostModalOpen}
+        onClose={() => setCreatePostModalOpen(false)}
+        courses={courses}
+      />
 
       {/* Authentication Modal */}
       <AuthModal

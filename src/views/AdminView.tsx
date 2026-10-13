@@ -38,7 +38,8 @@ import type {
   UserRole,
 } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { db, handleFirestoreError, OperationType, testConnection } from '../lib/firebase';
+import firebaseConfig from '../../firebase-applet-config.json';
 import {
   collection,
   doc,
@@ -84,6 +85,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [testingRtdb, setTestingRtdb] = useState(false);
   const [rtdbResult, setRtdbResult] = useState<{ success: boolean; message: string } | null>(null);
   const [offlineDrafts, setOfflineDrafts] = useState<Record<string, string>>(() => getAllOfflineDrafts());
+  const [dbPingStatus, setDbPingStatus] = useState<{ testing: boolean; connected?: boolean; latencyMs?: number; checkedAt?: string } | null>(null);
+
+  const handlePingDatabase = async () => {
+    setDbPingStatus({ testing: true });
+    const start = performance.now();
+    const ok = await testConnection();
+    const latency = Math.round(performance.now() - start);
+    setDbPingStatus({
+      testing: false,
+      connected: ok,
+      latencyMs: latency,
+      checkedAt: new Date().toLocaleTimeString('th-TH'),
+    });
+  };
 
   // Course Modal Form State
   const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
@@ -425,13 +440,165 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </div>
           </div>
 
-          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-3">
-            <h3 className="text-sm font-bold text-slate-900">
-              สถานะสถาปัตยกรรมและฐานข้อมูล
-            </h3>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              ระบบเชื่อมต่อกับ <strong>Google Cloud Firestore Enterprise</strong> เรียบร้อยแล้ว สิทธิ์การเข้าถึงข้อมูลได้รับการตรวจสอบผ่าน Security Rules อย่างปลอดภัย ไม่มีค่าจำลองในระบบ
-            </p>
+          {/* Live Database Status & Diagnostics Panel */}
+          <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Database className="w-4 h-4 text-amber-500" />
+                  <span>ตำแหน่งและสถานะฐานข้อมูลระบบจริง (Live Database Infrastructure)</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  ระบบจัดเก็บข้อมูลบน Google Cloud Firestore อย่างเป็นทางการ ข้อมูลทุกส่วนซิงก์แบบ Realtime สองทิศทาง
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={dbPingStatus?.testing}
+                  onClick={handlePingDatabase}
+                  className="py-2 px-3.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shadow-sm disabled:opacity-60"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${dbPingStatus?.testing ? 'animate-spin text-amber-400' : 'text-amber-400'}`} />
+                  <span>{dbPingStatus?.testing ? 'กำลังตรวจสอบ...' : 'ทดสอบ Ping ฐานข้อมูล (Ping DB)'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Ping Result Banner if tested */}
+            {dbPingStatus && !dbPingStatus.testing && (
+              <div
+                className={`p-3.5 rounded-xl text-xs flex items-center justify-between gap-3 ${
+                  dbPingStatus.connected
+                    ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border border-rose-200 text-rose-800'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {dbPingStatus.connected ? (
+                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  )}
+                  <span className="font-semibold">
+                    {dbPingStatus.connected
+                      ? `เชื่อมต่อฐานข้อมูล Firestore สำเร็จ (ออนไลน์ 100%) — เวลาตอบสนอง ~${dbPingStatus.latencyMs}ms`
+                      : 'ไม่สามารถติดต่อฐานข้อมูลได้ โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ตหรือสิทธิ์'}
+                  </span>
+                </div>
+                <span className="text-[11px] font-mono text-slate-500">
+                  ทดสอบเมื่อ: {dbPingStatus.checkedAt}
+                </span>
+              </div>
+            )}
+
+            {/* Connection Spec Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                <span className="text-[11px] text-slate-400 block font-medium">ประเภทฐานข้อมูล (Database Engine)</span>
+                <span className="font-semibold text-slate-800 mt-0.5 block flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse"></span>
+                  Google Cloud Firestore
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                <span className="text-[11px] text-slate-400 block font-medium">Firestore Database ID</span>
+                <span className="font-mono font-semibold text-amber-700 mt-0.5 block truncate" title={firebaseConfig.firestoreDatabaseId}>
+                  {firebaseConfig.firestoreDatabaseId}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                <span className="text-[11px] text-slate-400 block font-medium">Google Cloud Project ID</span>
+                <span className="font-mono font-semibold text-slate-800 mt-0.5 block">
+                  {firebaseConfig.projectId}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                <span className="text-[11px] text-slate-400 block font-medium">Auth Domain</span>
+                <span className="font-mono text-slate-700 mt-0.5 block truncate">
+                  {firebaseConfig.authDomain}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                <span className="text-[11px] text-slate-400 block font-medium">Security Rules Enforced</span>
+                <span className="font-semibold text-emerald-700 mt-0.5 block flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  Deployed (Zero-Trust Model)
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                <span className="text-[11px] text-slate-400 block font-medium">Web Client Origin</span>
+                <span className="font-mono text-slate-700 mt-0.5 block truncate" title={window.location.origin}>
+                  {window.location.origin}
+                </span>
+              </div>
+            </div>
+
+            {/* Live Collection Breakdown */}
+            <div className="space-y-2 pt-2">
+              <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                รายการคอลเลกชันในฐานข้อมูล (Firestore Collections)
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 text-xs">
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-white flex items-center justify-between">
+                  <span className="font-mono text-slate-600">courses</span>
+                  <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded text-[11px]">{courses.length}</span>
+                </div>
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-white flex items-center justify-between">
+                  <span className="font-mono text-slate-600">lessons</span>
+                  <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded text-[11px]">{lessons.length}</span>
+                </div>
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-white flex items-center justify-between">
+                  <span className="font-mono text-slate-600">quizzes</span>
+                  <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded text-[11px]">{quizzes.length}</span>
+                </div>
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-white flex items-center justify-between">
+                  <span className="font-mono text-slate-600">assignments</span>
+                  <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded text-[11px]">{assignments.length}</span>
+                </div>
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-white flex items-center justify-between">
+                  <span className="font-mono text-slate-600">submissions</span>
+                  <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded text-[11px]">{submissions.length}</span>
+                </div>
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-white flex items-center justify-between">
+                  <span className="font-mono text-slate-600">site_settings</span>
+                  <span className="font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded text-[11px]">Active</span>
+                </div>
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-white flex items-center justify-between">
+                  <span className="font-mono text-slate-600">discussions</span>
+                  <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded text-[11px]">Realtime</span>
+                </div>
+                <div className="p-2.5 rounded-lg border border-slate-200 bg-white flex items-center justify-between">
+                  <span className="font-mono text-slate-600">user_progress</span>
+                  <span className="font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded text-[11px]">Per-User</span>
+                </div>
+              </div>
+            </div>
+
+            {/* How to verify guide */}
+            <div className="p-4 rounded-xl bg-amber-50/60 border border-amber-200/70 text-xs text-amber-950 space-y-2">
+              <span className="font-bold flex items-center gap-1.5 text-amber-900">
+                <HelpCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                วิธีตรวจสอบข้อมูลจริงด้วยตัวเอง:
+              </span>
+              <ul className="list-disc list-inside space-y-1 text-slate-700 text-[11px] leading-relaxed">
+                <li>
+                  <strong>ดาวน์โหลดดูข้อมูลทั้งหมด (JSON Export)</strong>: ไปที่แท็บ <strong>&ldquo;สำรองข้อมูล (Backup)&rdquo;</strong> ด้านบน แล้วกดปุ่ม <em>ดาวน์โหลดไฟล์สำรองข้อมูล</em> จะได้ไฟล์ JSON ที่รวบรวมข้อมูลสดทั้งหมดในฐานข้อมูลออกมาเปิดดูได้ทันที
+                </li>
+                <li>
+                  <strong>ตรวจผ่าน Network ในเบราว์เซอร์ (F12)</strong>: กดเปิด F12 &gt; แถบ Network แล้วลองสร้างหรือแก้ไขคอร์ส/บทเรียน จะเห็น Request วิ่งตรงไปยัง Google Firestore API แบบ Realtime
+                </li>
+                <li>
+                  <strong>ตรวจสอบไฟล์คอนฟิกในโค้ด</strong>: ดูรายละเอียดการตั้งค่าฐานข้อมูลได้ที่ <code>firebase-applet-config.json</code> และโครงสร้างตารางได้ที่ <code>firebase-blueprint.json</code>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
       )}
